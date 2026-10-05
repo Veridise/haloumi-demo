@@ -1,0 +1,2289 @@
+diff --git a/.haloumi/cfg.toml b/.haloumi/cfg.toml
+new file mode 100644
+index 0000000..972261a
+--- /dev/null
++++ b/.haloumi/cfg.toml
+@@ -0,0 +1,18 @@
++[extractor]
++preludes = ["spread"]
++
++[extractor.dependency]
++git = "https://github.com/project-llzk/haloumi"
++branch = "dani/cargo-haloumi-2"
++package = "haloumi-extractor-runner"
++
++[target]
++features = ["extraction"]
++
++[backends.picus]
++enabled = true
++optimize = true
++
++[backends.llzk]
++enabled = true
++field = "bls12"
+diff --git a/.haloumi/specs/midnight-proofs.toml b/.haloumi/specs/midnight-proofs.toml
+new file mode 100644
+index 0000000..bec53a1
+--- /dev/null
++++ b/.haloumi/specs/midnight-proofs.toml
+@@ -0,0 +1,314 @@
++[targets]
++midnight-proofs = ">= 0.8.0"
++
++[dependencies.haloumi-integration]
++git = "https://github.com/project-llzk/haloumi"
++branch = "dani/cargo-haloumi-2"
++package = "haloumi-integration"
++features = ["derive"]
++
++###-------------------------------------------------------------------------------###
++### src/circuit/floor_planner/single_pass.rs
++###-------------------------------------------------------------------------------###
++
++[[patch.derive]]
++path = "src/circuit/floor_planner/single_pass.rs"
++type = "SingleChipLayouter"
++trait = "haloumi_integration::RegionsGroupHooks"
++
++###-------------------------------------------------------------------------------###
++### src/circuit/floor_planner/v1.rs
++###-------------------------------------------------------------------------------###
++
++[[patch.derive]]
++path = "src/circuit/floor_planner/v1.rs"
++type = "V1Pass"
++trait = "haloumi_integration::RegionsGroupHooks"
++
++###-------------------------------------------------------------------------------###
++### src/circuit/mod.rs
++###-------------------------------------------------------------------------------###
++
++[[patch.append]]
++path = "src/circuit/mod.rs"
++content = """
++haloumi_integration::__impl_from_region_index_for_haloumi_region_index!(RegionIndex);
++
++haloumi_integration::__impl_from_cell_for_haloumi_cell!(Cell);
++
++haloumi_integration::__impl_from_cell_for_asigned_cell!(AssignedCell, ff::Field);
++haloumi_integration::__impl_advice_copy_for_assigned_cell!(
++    AssignedCell,
++    ff::Field,
++    crate::ExtractionSupport,
++    Region,
++    Column<Advice>,
++    Error,
++    Rational
++);
++
++use haloumi_integration::core::table::CellReprSize;
++use haloumi_integration::extractor::core::io::{
++load::LoadFromCells,
++store::StoreIntoCells,
++ctx::input::ICtx,
++ctx::output::OCtx
++};
++use haloumi_integration::core::layouter::{LayoutAdaptor, Layouter as HaloumiLayouter};
++use haloumi_integration::ir::inject::InjectedIR;
++
++impl<V, F: ff::PrimeField> CellReprSize for AssignedCell<V, F> {
++    const SIZE: usize = 1;
++}
++
++
++impl<V, F, C> LoadFromCells<F, C, crate::ExtractionSupport>
++    for AssignedCell<V, F>
++where
++    F: ff::PrimeField,
++    V: Clone,
++    Rational<F>: for<'v> From<&'v V>,
++{
++    fn load(
++        ctx: &mut ICtx<F, crate::ExtractionSupport>,
++        _: &C,
++        layouter: &mut LayoutAdaptor<'_, impl HaloumiLayouter<F, Error>>,
++        _: &mut InjectedIR<
++            RegionIndex,
++            crate::plonk::Expression<F>,
++        >,
++    ) -> Result<Self, Error> {
++        ctx.assign_next(layouter)
++    }
++}
++
++impl<V, F: ff::PrimeField, C> StoreIntoCells<F, C, crate::ExtractionSupport>
++    for AssignedCell<V, F>
++{
++    fn store(
++        self,
++        ctx: &mut OCtx<F, crate::ExtractionSupport>,
++        _: &C,
++        layouter: &mut LayoutAdaptor<'_, impl HaloumiLayouter<F, Error>>,
++        _: &mut InjectedIR<
++            RegionIndex,
++            crate::plonk::Expression<F>,
++        >,
++    ) -> Result<(), Error> {
++        ctx.assign_next(self, layouter)
++    }
++}
++
++
++haloumi_integration::__impl_from_region_adaptor!(Region, layouter::RegionLayouter, Field, Error);
++
++haloumi_integration::__impl_layouter_adaptor!(
++    Layouter,
++    layouter::RegionLayouter,
++    TableLayouter,
++    Field,
++    Error,
++    Region,
++    Table,
++    Value,
++    Cell,
++    Column<Instance>,
++    Challenge
++);
++haloumi_integration::__impl_region_layouter_adaptor!(
++    layouter::RegionLayouter,
++    Field,
++    Error,
++    Value,
++    Rational,
++    Cell,
++    Column<Instance>,
++    Column<Advice>,
++    Column<Fixed>,
++    Column<Any>,
++    Selector
++);
++haloumi_integration::__impl_table_layouter_adaptor!(
++    TableLayouter,
++    Field,
++    Error,
++    Value,
++    Rational,
++    TableColumn,
++);
++
++haloumi_integration::__impl_layouter_for_group_layouter!(
++    Field,
++    Layouter,
++    crate::plonk::Error,
++    Region,
++    Table,
++    Cell,
++    crate::plonk::Column<crate::plonk::Instance>,
++    crate::plonk::Challenge,
++    Value
++);
++
++"""
++
++[[patch.derive]]
++path = "src/circuit/mod.rs"
++type = "Cell"
++trait = "haloumi_integration::DecomposeInCells"
++attributes.type = ["cell(Self)"]
++
++[[patch.derive]]
++path = "src/circuit/mod.rs"
++type = "AssignedCell"
++trait = "haloumi_integration::DecomposeInCells"
++attributes.fields.value = ["skip"]
++
++[[patch.attribute]]
++path = "src/circuit/mod.rs"
++target = "Layouter"
++attributes = ["haloumi_integration::require_group_hooks"]
++
++[[patch.derive]]
++path = "src/circuit/mod.rs"
++type = "NamespacedLayouter"
++trait = "haloumi_integration::RegionsGroupHooks"
++attributes.fields = { "0" = ["delegate", "root"] }
++
++###-------------------------------------------------------------------------------###
++### src/dev/tfp.rs
++###-------------------------------------------------------------------------------###
++
++[[patch.derive]]
++path = "src/dev/tfp.rs"
++type = "TracingLayouter"
++trait = "haloumi_integration::RegionsGroupHooks"
++attributes.fields.layouter = ["delegate"] 
++
++###-------------------------------------------------------------------------------###
++### src/plonk/circuit.rs
++###-------------------------------------------------------------------------------###
++
++[[patch.append]]
++path = "src/plonk/circuit.rs"
++content = """
++haloumi_integration::__impl_column_support!(ColumnType, Column, Any, Instance, Advice, Fixed);
++haloumi_integration::__impl_root_auto_configure_impl!(
++    Column<Fixed>,
++    fixed_column,
++    crate::plonk::ConstraintSystem,
++    ff::Field
++);
++haloumi_integration::__impl_root_auto_configure_impl!(
++    Column<Instance>,
++    instance_column,
++    crate::plonk::ConstraintSystem,
++    ff::Field
++);
++haloumi_integration::__impl_root_auto_configure_impl!(
++    Column<Advice>,
++    advice_column,
++    crate::plonk::ConstraintSystem,
++    ff::Field
++);
++haloumi_integration::__impl_root_auto_configure_impl!(
++    TableColumn,
++    lookup_table_column,
++    crate::plonk::ConstraintSystem,
++    ff::Field
++);
++"""
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "Selector"
++trait = "haloumi_integration::SelectorInfo"
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "FixedQuery"
++trait = "haloumi_integration::QueryInfo"
++attributes.type = ["kind(Fixed)"]
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "FixedQuery"
++trait = "haloumi_integration::CreateQuery"
++attributes.type = ["new(Fixed)"]
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "AdviceQuery"
++trait = "haloumi_integration::QueryInfo"
++attributes.type = ["kind(Advice)"]
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "AdviceQuery"
++trait = "haloumi_integration::CreateQuery"
++attributes.type = ["new(Advice::default())"]
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "InstanceQuery"
++trait = "haloumi_integration::QueryInfo"
++attributes.type = ["kind(Instance)"]
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "InstanceQuery"
++trait = "haloumi_integration::CreateQuery"
++attributes.type = ["new(Instance)"]
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "Challenge"
++trait = "haloumi_integration::ChallengeInfo"
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "Expression"
++trait = "haloumi_integration::Expression"
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "Gate"
++trait = "haloumi_integration::GateInfo"
++
++[[patch.derive]]
++path = "src/plonk/circuit.rs"
++type = "ConstraintSystem"
++trait = "haloumi_integration::ConstraintSystemInfo"
++
++###-------------------------------------------------------------------------------###
++### src/plonk/error.rs
++###-------------------------------------------------------------------------------###
++
++[[patch.append]]
++path = "src/plonk/error.rs"
++content = """
++haloumi_integration::__impl_into_and_from_error!(Error, |value| Self::Transcript(
++    std::io::Error::other(value)
++));
++"""
++
++###-------------------------------------------------------------------------------###
++### src/lib.rs
++###-------------------------------------------------------------------------------###
++
++[[patch.append]]
++path = "src/lib.rs"
++content = """
++haloumi_integration::__impl_types_trait!(
++    ExtractionSupport,
++    ff::Field,
++    crate::plonk::Column<crate::plonk::Instance>,
++    crate::plonk::Column<crate::plonk::Advice>,
++    crate::circuit::Cell,
++    crate::circuit::AssignedCell,
++    crate::circuit::Region,
++    crate::plonk::Error,
++    crate::circuit::RegionIndex,
++    crate::plonk::Expression,
++    crate::utils::rational::Rational
++);
++"""
+diff --git a/Cargo.lock b/Cargo.lock
+index 7e24477..b1c6b69 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -11,6 +11,18 @@ dependencies = [
+  "memchr",
+ ]
+ 
++[[package]]
++name = "allocator-api2"
++version = "0.2.21"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
++
++[[package]]
++name = "anyhow"
++version = "1.0.104"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
++
+ [[package]]
+ name = "arrayref"
+ version = "0.3.9"
+@@ -52,12 +64,73 @@ version = "1.8.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
+ 
++[[package]]
++name = "bindgen"
++version = "0.71.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
++dependencies = [
++ "bitflags 2.13.2",
++ "cexpr",
++ "clang-sys",
++ "itertools 0.10.5",
++ "log",
++ "prettyplease",
++ "proc-macro2",
++ "quote",
++ "regex",
++ "rustc-hash",
++ "shlex",
++ "syn 2.0.111",
++]
++
++[[package]]
++name = "bindgen"
++version = "0.72.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
++dependencies = [
++ "bitflags 2.13.2",
++ "cexpr",
++ "clang-sys",
++ "itertools 0.10.5",
++ "log",
++ "prettyplease",
++ "proc-macro2",
++ "quote",
++ "regex",
++ "rustc-hash",
++ "shlex",
++ "syn 2.0.111",
++]
++
++[[package]]
++name = "bit-set"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
++dependencies = [
++ "bit-vec",
++]
++
++[[package]]
++name = "bit-vec"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
++
+ [[package]]
+ name = "bitflags"
+ version = "1.3.2"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
+ 
++[[package]]
++name = "bitflags"
++version = "2.13.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
++
+ [[package]]
+ name = "bitvec"
+ version = "1.0.1"
+@@ -114,6 +187,15 @@ version = "1.2.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7575182f7272186991736b70173b0ea045398f984bf5ebbb3804736ce1330c9d"
+ 
++[[package]]
++name = "caseless"
++version = "0.2.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8b6fd507454086c8edfd769ca6ada439193cdb209c7681712ef6275cccbfe5d8"
++dependencies = [
++ "unicode-normalization",
++]
++
+ [[package]]
+ name = "cast"
+ version = "0.3.0"
+@@ -130,23 +212,57 @@ dependencies = [
+  "shlex",
+ ]
+ 
++[[package]]
++name = "cexpr"
++version = "0.6.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6fac387a98bb7c37292057cffc56d62ecb629900026402633ae9160df93a8766"
++dependencies = [
++ "nom",
++]
++
+ [[package]]
+ name = "cfg-if"
+ version = "1.0.4"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+ 
++[[package]]
++name = "clang-sys"
++version = "1.9.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
++dependencies = [
++ "glob",
++ "libc",
++ "libloading",
++]
++
+ [[package]]
+ name = "clap"
+ version = "2.34.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "a0610544180c38b88101fecf2dd634b174a62eef6946f84dfc6a7127512b381c"
+ dependencies = [
+- "bitflags",
++ "bitflags 1.3.2",
+  "textwrap",
+  "unicode-width",
+ ]
+ 
++[[package]]
++name = "comrak"
++version = "0.42.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ccde7f074aafedd0dfa210b7df42326927e3b64f499e0ce8dcc5c132ef08baba"
++dependencies = [
++ "caseless",
++ "entities",
++ "memchr",
++ "slug",
++ "typed-arena",
++ "unicode_categories",
++]
++
+ [[package]]
+ name = "const-oid"
+ version = "0.9.6"
+@@ -159,6 +275,15 @@ version = "0.3.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
+ 
++[[package]]
++name = "convert_case"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
++dependencies = [
++ "unicode-segmentation",
++]
++
+ [[package]]
+ name = "cpufeatures"
+ version = "0.2.17"
+@@ -297,7 +422,7 @@ checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn",
++ "syn 2.0.111",
+ ]
+ 
+ [[package]]
+@@ -310,6 +435,12 @@ dependencies = [
+  "zeroize",
+ ]
+ 
++[[package]]
++name = "deunicode"
++version = "1.6.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
++
+ [[package]]
+ name = "digest"
+ version = "0.10.7"
+@@ -320,6 +451,12 @@ dependencies = [
+  "crypto-common",
+ ]
+ 
++[[package]]
++name = "disjoint"
++version = "0.8.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c37b399c91d093763e38c7a57a740e0005e30e5aff7132e791aada5eef3fed99"
++
+ [[package]]
+ name = "ecdsa"
+ version = "0.16.9"
+@@ -358,6 +495,24 @@ dependencies = [
+  "zeroize",
+ ]
+ 
++[[package]]
++name = "entities"
++version = "1.0.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "b5320ae4c3782150d900b79807611a59a99fc9a1d61d686faafc24b93fc8d7ca"
++
++[[package]]
++name = "equivalent"
++version = "1.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
++
++[[package]]
++name = "eqv"
++version = "0.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "0349da71389e03ffaf540a489eb71bc7d13492892882688f250ee48975d888ac"
++
+ [[package]]
+ name = "ff"
+ version = "0.13.1"
+@@ -381,6 +536,12 @@ version = "0.1.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3a3076410a55c90011c298b04d0cfa770b00fa04e1e3c97d3f6c9de105a03844"
+ 
++[[package]]
++name = "foldhash"
++version = "0.1.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
++
+ [[package]]
+ name = "funty"
+ version = "2.0.0"
+@@ -436,6 +597,229 @@ version = "1.8.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "1b43ede17f21864e81be2fa654110bf1e793774238d86ef8555c37e6519c0403"
+ 
++[[package]]
++name = "haloumi-backend"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "disjoint",
++ "eqv",
++ "haloumi-core",
++ "haloumi-ir",
++ "haloumi-ir-gen",
++ "haloumi-lowering",
++ "haloumi-synthesis",
++ "log",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-core"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "eqv",
++ "ff",
++ "internment",
++ "log",
++ "num-bigint",
++ "serde",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-driver"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "ff",
++ "haloumi-core",
++ "haloumi-ir",
++ "haloumi-ir-gen",
++ "haloumi-llzk",
++ "haloumi-picus",
++ "haloumi-synthesis",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-extractor"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "anyhow",
++ "ff",
++ "haloumi-core",
++ "haloumi-driver",
++ "haloumi-extractor-core",
++ "haloumi-ir",
++ "haloumi-ir-gen",
++ "haloumi-synthesis",
++ "inventory",
++ "log",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-extractor-core"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "ff",
++ "haloumi-core",
++ "haloumi-ir",
++ "haloumi-ir-gen",
++ "haloumi-synthesis",
++ "num-bigint",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-integration"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "anyhow",
++ "ff",
++ "haloumi-core",
++ "haloumi-extractor",
++ "haloumi-extractor-core",
++ "haloumi-integration-macros",
++ "haloumi-ir",
++ "haloumi-ir-gen",
++ "haloumi-synthesis",
++ "num-bigint",
++ "num-traits",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-integration-macros"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "log",
++ "proc-macro-crate",
++ "proc-macro2",
++ "quote",
++ "syn 3.0.6",
++]
++
++[[package]]
++name = "haloumi-ir"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "bit-set",
++ "eqv",
++ "ff",
++ "haloumi-core",
++ "haloumi-lowering",
++ "internment",
++ "log",
++ "num-bigint",
++ "serde",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-ir-gen"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "ff",
++ "haloumi-core",
++ "haloumi-ir",
++ "haloumi-synthesis",
++ "log",
++ "serde",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-llzk"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "anyhow",
++ "disjoint",
++ "eqv",
++ "haloumi-backend",
++ "haloumi-core",
++ "haloumi-ir",
++ "haloumi-ir-gen",
++ "haloumi-lowering",
++ "haloumi-synthesis",
++ "lazy_static",
++ "llzk",
++ "log",
++ "melior",
++ "mlir-sys",
++ "num-bigint",
++ "regex",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-lowering"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "ff",
++ "haloumi-core",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-picus"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "anyhow",
++ "disjoint",
++ "eqv",
++ "haloumi-backend",
++ "haloumi-core",
++ "haloumi-ir",
++ "haloumi-ir-gen",
++ "haloumi-lowering",
++ "haloumi-synthesis",
++ "lazy_static",
++ "log",
++ "regex",
++ "thiserror",
++]
++
++[[package]]
++name = "haloumi-synthesis"
++version = "0.5.15"
++source = "git+https://github.com/project-llzk/haloumi?branch=dani%2Fcargo-haloumi#afd05a9b3e8f6de0d96330848e38f7feb421bad7"
++dependencies = [
++ "bit-set",
++ "ff",
++ "haloumi-core",
++ "log",
++ "serde",
++ "thiserror",
++]
++
++[[package]]
++name = "hashbrown"
++version = "0.15.5"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
++dependencies = [
++ "allocator-api2",
++ "equivalent",
++ "foldhash",
++]
++
++[[package]]
++name = "hashbrown"
++version = "0.17.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
++
+ [[package]]
+ name = "hermit-abi"
+ version = "0.1.19"
+@@ -460,6 +844,34 @@ dependencies = [
+  "serde",
+ ]
+ 
++[[package]]
++name = "indexmap"
++version = "2.14.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "cc4e190f5d26ca7051642629da2c52fc03bde85a03197c99408dcd291734c855"
++dependencies = [
++ "equivalent",
++ "hashbrown 0.17.1",
++]
++
++[[package]]
++name = "internment"
++version = "0.8.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "636d4b0f6a39fd684effe2a73f5310df16a3fa7954c26d36833e98f44d1977a2"
++dependencies = [
++ "hashbrown 0.15.5",
++]
++
++[[package]]
++name = "inventory"
++version = "0.3.24"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
++dependencies = [
++ "rustversion",
++]
++
+ [[package]]
+ name = "itertools"
+ version = "0.10.5"
+@@ -526,6 +938,98 @@ version = "0.2.178"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
+ 
++[[package]]
++name = "libloading"
++version = "0.8.9"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
++dependencies = [
++ "cfg-if",
++ "windows-link",
++]
++
++[[package]]
++name = "llzk"
++version = "0.7.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a02649ec361296cb0db4ce9d0125ce3d970c949bfa38b502a3e768ba7862b0bb"
++dependencies = [
++ "llzk-macro",
++ "llzk-sys",
++ "log",
++ "melior",
++ "mlir-sys",
++ "num-bigint",
++ "paste",
++]
++
++[[package]]
++name = "llzk-macro"
++version = "0.3.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c3f17d3446516be7877386852378e56e73fb0924a8c2108f0991dcacf4b49677"
++dependencies = [
++ "convert_case",
++ "proc-macro2",
++ "quote",
++ "syn 2.0.111",
++ "thiserror",
++]
++
++[[package]]
++name = "llzk-sys"
++version = "30.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bc183171d12e1ad4c3d53edd6d54866a0b1e907bd966afec9d2fd56c3d48b521"
++dependencies = [
++ "anyhow",
++ "llzk-sys-build-support",
++ "mlir-sys",
++]
++
++[[package]]
++name = "llzk-sys-build-support"
++version = "1.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "28210153860126ef27febf43e4be2c0215ff4e00c6d561c04601c3d1a48e7403"
++dependencies = [
++ "anyhow",
++ "bindgen 0.71.1",
++ "cc",
++]
++
++[[package]]
++name = "log"
++version = "0.4.34"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
++
++[[package]]
++name = "melior"
++version = "0.25.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "dd600336f22a76d4de41c54c27561a6be90c7a10f4586aab4c564b8da28f2f2a"
++dependencies = [
++ "melior-macro",
++ "mlir-sys",
++]
++
++[[package]]
++name = "melior-macro"
++version = "0.18.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "41ad461682befe0344538c5ee53ad1da53eef55e1db17071a7e748e74bb7f637"
++dependencies = [
++ "comrak",
++ "convert_case",
++ "proc-macro2",
++ "quote",
++ "regex",
++ "syn 2.0.111",
++ "tblgen",
++ "unindent",
++]
++
+ [[package]]
+ name = "memchr"
+ version = "2.7.6"
+@@ -583,6 +1087,31 @@ dependencies = [
+  "tracing",
+ ]
+ 
++[[package]]
++name = "minimal-lexical"
++version = "0.2.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
++
++[[package]]
++name = "mlir-sys"
++version = "0.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8e9348dd263d2680d657635d9dd084cdcd785d7486a41332ffa4c926d5882b54"
++dependencies = [
++ "bindgen 0.71.1",
++]
++
++[[package]]
++name = "nom"
++version = "7.1.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
++dependencies = [
++ "memchr",
++ "minimal-lexical",
++]
++
+ [[package]]
+ name = "num-bigint"
+ version = "0.4.6"
+@@ -591,6 +1120,7 @@ checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
+ dependencies = [
+  "num-integer",
+  "num-traits",
++ "serde",
+ ]
+ 
+ [[package]]
+@@ -712,6 +1242,16 @@ dependencies = [
+  "zerocopy",
+ ]
+ 
++[[package]]
++name = "prettyplease"
++version = "0.2.37"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
++dependencies = [
++ "proc-macro2",
++ "syn 2.0.111",
++]
++
+ [[package]]
+ name = "primeorder"
+ version = "0.13.6"
+@@ -721,6 +1261,15 @@ dependencies = [
+  "elliptic-curve",
+ ]
+ 
++[[package]]
++name = "proc-macro-crate"
++version = "3.5.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
++dependencies = [
++ "toml_edit",
++]
++
+ [[package]]
+ name = "proc-macro2"
+ version = "1.0.103"
+@@ -833,6 +1382,12 @@ version = "0.8.8"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
+ 
++[[package]]
++name = "rustc-hash"
++version = "2.1.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
++
+ [[package]]
+ name = "rustc_version"
+ version = "0.4.1"
+@@ -929,7 +1484,7 @@ checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn",
++ "syn 2.0.111",
+ ]
+ 
+ [[package]]
+@@ -973,6 +1528,7 @@ dependencies = [
+  "blake2b_simd",
+  "criterion",
+  "ff",
++ "haloumi-integration",
+  "midnight-curves",
+  "midnight-proofs",
+  "num-bigint",
+@@ -996,6 +1552,16 @@ dependencies = [
+  "rand_core",
+ ]
+ 
++[[package]]
++name = "slug"
++version = "0.1.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "882a80f72ee45de3cc9a5afeb2da0331d58df69e4e7d8eeb5d3c7784ae67e724"
++dependencies = [
++ "deunicode",
++ "wasm-bindgen",
++]
++
+ [[package]]
+ name = "spki"
+ version = "0.7.3"
+@@ -1023,12 +1589,35 @@ dependencies = [
+  "unicode-ident",
+ ]
+ 
++[[package]]
++name = "syn"
++version = "3.0.6"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "unicode-ident",
++]
++
+ [[package]]
+ name = "tap"
+ version = "1.0.1"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+ 
++[[package]]
++name = "tblgen"
++version = "0.7.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7364c3b3e7036cebffcc65895bff60ca160e1c9d98a84fb24f723e8c90b02a60"
++dependencies = [
++ "bindgen 0.72.1",
++ "cc",
++ "paste",
++ "thiserror",
++]
++
+ [[package]]
+ name = "textwrap"
+ version = "0.11.0"
+@@ -1038,6 +1627,26 @@ dependencies = [
+  "unicode-width",
+ ]
+ 
++[[package]]
++name = "thiserror"
++version = "2.0.20"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
++dependencies = [
++ "thiserror-impl",
++]
++
++[[package]]
++name = "thiserror-impl"
++version = "2.0.20"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
++dependencies = [
++ "proc-macro2",
++ "quote",
++ "syn 3.0.6",
++]
++
+ [[package]]
+ name = "threadpool"
+ version = "1.8.1"
+@@ -1057,6 +1666,42 @@ dependencies = [
+  "serde_json",
+ ]
+ 
++[[package]]
++name = "tinyvec"
++version = "1.13.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
++
++[[package]]
++name = "toml_datetime"
++version = "1.1.1+spec-1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
++dependencies = [
++ "serde_core",
++]
++
++[[package]]
++name = "toml_edit"
++version = "0.25.15+spec-1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1340ea94a5856333492c9064b02c778b191dd2c853778d9609debdcdfea3a614"
++dependencies = [
++ "indexmap",
++ "toml_datetime",
++ "toml_parser",
++ "winnow",
++]
++
++[[package]]
++name = "toml_parser"
++version = "1.1.3+spec-1.1.0"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "1d38ac1cf9b95face32296c0a3ede1fdc270627c9d9c02a7274dd6d960dc4d56"
++dependencies = [
++ "winnow",
++]
++
+ [[package]]
+ name = "tracing"
+ version = "0.1.43"
+@@ -1076,7 +1721,7 @@ checksum = "7490cfa5ec963746568740651ac6781f701c9c5ea257c58e057f3ba8cf69e8da"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn",
++ "syn 2.0.111",
+ ]
+ 
+ [[package]]
+@@ -1088,6 +1733,12 @@ dependencies = [
+  "once_cell",
+ ]
+ 
++[[package]]
++name = "typed-arena"
++version = "2.0.2"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
++
+ [[package]]
+ name = "typenum"
+ version = "1.19.0"
+@@ -1100,12 +1751,39 @@ version = "1.0.22"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "9312f7c4f6ff9069b165498234ce8be658059c6728633667c526e27dc2cf1df5"
+ 
++[[package]]
++name = "unicode-normalization"
++version = "0.1.25"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
++dependencies = [
++ "tinyvec",
++]
++
++[[package]]
++name = "unicode-segmentation"
++version = "1.13.3"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
++
+ [[package]]
+ name = "unicode-width"
+ version = "0.1.14"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
+ 
++[[package]]
++name = "unicode_categories"
++version = "0.1.1"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "39ec24b3121d976906ece63c9daad25b85969647682eee313cb5779fdd69e14e"
++
++[[package]]
++name = "unindent"
++version = "0.2.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "7264e107f553ccae879d21fbea1d6724ac785e8c3bfc762137959b5802826ef3"
++
+ [[package]]
+ name = "version_check"
+ version = "0.9.5"
+@@ -1160,7 +1838,7 @@ dependencies = [
+  "bumpalo",
+  "proc-macro2",
+  "quote",
+- "syn",
++ "syn 2.0.111",
+  "wasm-bindgen-shared",
+ ]
+ 
+@@ -1229,6 +1907,15 @@ dependencies = [
+  "windows-link",
+ ]
+ 
++[[package]]
++name = "winnow"
++version = "1.0.4"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
++dependencies = [
++ "memchr",
++]
++
+ [[package]]
+ name = "wyz"
+ version = "0.5.1"
+@@ -1255,7 +1942,7 @@ checksum = "d8a8d209fdf45cf5138cbb5a506f6b52522a25afccc534d1475dad8e31105c6a"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn",
++ "syn 2.0.111",
+ ]
+ 
+ [[package]]
+@@ -1275,5 +1962,5 @@ checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
+ dependencies = [
+  "proc-macro2",
+  "quote",
+- "syn",
++ "syn 2.0.111",
+ ]
+diff --git a/Cargo.toml b/Cargo.toml
+index 0568537..b1377ac 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -19,6 +19,7 @@ num-bigint = { version = "0.4" }
+ rand = "0.8"
+ blake2b_simd = "1.0.3"
+ ff = "0.13"
++picus = { package = "haloumi-integration", git = "https://github.com/project-llzk/haloumi", branch = "dani/cargo-haloumi-2", features = ["extractor", "derive"] }
+ 
+ [dev-dependencies]
+ criterion = "0.3"
+@@ -29,3 +30,6 @@ sha3 = "0.10.0"
+ name = "sha3_preimage"
+ harness = false
+ 
++[features]
++default = []
++extraction = []
+diff --git a/src/lib.rs b/src/lib.rs
+index fd0799a..b773487 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -7,3 +7,276 @@ pub mod sha3_256_gadget;
+ 
+ /// Number of bytes in a digest of Keccak.
+ pub use constants::KECCAK_SQUEEZE_BYTES;
++use picus::{extractor::core::prelude::Prelude, ir::stmt::IRStmt};
++
++pub fn harnesses() -> impl Iterator<Item = &'static picus::extractor::Harness> {
++    picus::extractor::inventory::iter::<picus::extractor::Harness>()
++}
++
++picus::register_prelude!("spread", spread_prelude);
++pub fn spread_prelude() -> Prelude {
++    Prelude::new()
++        .add("Spread".to_string(), 1, 1, |_, o| {
++            IRStmt::assume_deterministic(o[0])
++        })
++        .add("Unspread".to_string(), 1, 1, |_, o| {
++            IRStmt::assume_deterministic(o[0])
++        })
++}
++
++#[cfg(feature = "extraction")]
++mod lookup_callbacks {
++    //! Lookup callbacks used by the SHA-3 extraction harnesses.
++
++    use std::borrow::Cow;
++
++    use ff::Field;
++    use midnight_curves::Fq;
++    use midnight_proofs::plonk::{AdviceQuery, Expression};
++    use picus::{
++        core::info_traits::CreateQuery as _,
++        ir::{
++            expr::IRBexpr,
++            meta::HasMeta,
++            stmt::{EmitIf as _, IRStmt},
++        },
++        ir_gen::{
++            lookups::{
++                callbacks::{LookupCallbacks, LookupResult},
++                table::LookupTableGenerator,
++            },
++            temps::{ExprOrTemp, Temps},
++        },
++        synthesis::lookups::Lookup,
++    };
++
++    #[derive(Debug, Default)]
++    pub(crate) struct Sha3LookupCallbacks;
++
++    pub(crate) fn sha3_lookup_callbacks() -> Sha3LookupCallbacks {
++        Sha3LookupCallbacks
++    }
++
++    #[derive(Clone, Copy)]
++    enum Mode {
++        Byte,
++        Any,
++        Tag12,
++        Tagged,
++    }
++
++    impl Sha3LookupCallbacks {
++        fn mode(name: &str) -> Option<Mode> {
++            if name.starts_with("spread byte lookup") {
++                Some(Mode::Byte)
++            } else if name.starts_with("decomposition lookup")
++                && (name.ends_with("limb 0")
++                    || name.ends_with("limb 1")
++                    || name.ends_with("limb 2"))
++            {
++                Some(Mode::Any)
++            } else if name == "decomposition lookup: limb 3" {
++                Some(Mode::Tag12)
++            } else if name.starts_with("decomposition lookup")
++                && (name.ends_with("limb 4") || name.ends_with("limb 5"))
++            {
++                Some(Mode::Tagged)
++            } else {
++                None
++            }
++        }
++
++        fn parts<'a>(
++            mode: Mode,
++            l: &'a Lookup<Expression<Fq>>,
++            temps: &mut Temps,
++        ) -> (
++            ExprOrTemp<Cow<'a, Expression<Fq>>>,
++            ExprOrTemp<Cow<'a, Expression<Fq>>>,
++            ExprOrTemp<Cow<'a, Expression<Fq>>>,
++        ) {
++            match mode {
++                Mode::Byte => (
++                    expr(&l.inputs()[0]),
++                    expr(&l.inputs()[1]),
++                    expr(&l.inputs()[2]),
++                ),
++                Mode::Any => (owned(13), temp(temps), expr(&l.inputs()[0])),
++                Mode::Tag12 | Mode::Tagged => {
++                    (expr(&l.inputs()[0]), temp(temps), expr(&l.inputs()[1]))
++                }
++            }
++        }
++
++        fn check(mode: Mode, l: &Lookup<Expression<Fq>>) -> Result<(), Error> {
++            let size = match mode {
++                Mode::Byte => 3,
++                Mode::Any => 1,
++                Mode::Tag12 | Mode::Tagged => 2,
++            };
++            if l.inputs().len() != size {
++                return Err(Error::Inputs);
++            }
++            match mode {
++                Mode::Byte => tag(&l.inputs()[0], 8),
++                Mode::Tag12 => tag(&l.inputs()[0], 12),
++                _ => Ok(()),
++            }
++        }
++
++        fn call<'a>(
++            name: &str,
++            input: ExprOrTemp<Cow<'a, Expression<Fq>>>,
++            output: ExprOrTemp<Cow<'a, Expression<Fq>>>,
++            temps: &mut Temps,
++        ) -> IRStmt<ExprOrTemp<Cow<'a, Expression<Fq>>>> {
++            let (out, reused) = match &output {
++                ExprOrTemp::Temp(t) => (*t, true),
++                ExprOrTemp::Expr(_) => (temps.next().unwrap(), false),
++            };
++            let call = IRStmt::call(name, [input], [out.into()]);
++            if reused {
++                call
++            } else {
++                call.then(IRStmt::eq(output, ExprOrTemp::Temp(out)))
++            }
++        }
++
++        fn bounds<'a>(
++            tag: ExprOrTemp<Cow<'a, Expression<Fq>>>,
++            dense: ExprOrTemp<Cow<'a, Expression<Fq>>>,
++            spread: ExprOrTemp<Cow<'a, Expression<Fq>>>,
++        ) -> IRStmt<ExprOrTemp<Cow<'a, Expression<Fq>>>> {
++            let zero = IRBexpr::and_many([
++                IRBexpr::eq(tag.clone(), owned(0)),
++                IRBexpr::eq(dense.clone(), owned(0)),
++                IRBexpr::eq(spread.clone(), owned(0)),
++            ]);
++            let checks = (1_u32..14).map(|bits| {
++                IRBexpr::and_many([
++                    IRBexpr::eq(tag.clone(), owned(bits.into())),
++                    IRBexpr::lt(dense.clone(), owned(2_u64.pow(bits))),
++                    IRBexpr::le(spread.clone(), owned((8_u64.pow(bits) - 1) / 7)),
++                ])
++            });
++            IRStmt::assert(IRBexpr::or_many(std::iter::once(zero).chain(checks)))
++        }
++
++        fn determinism<'a>(
++            spread: &ExprOrTemp<Cow<'a, Expression<Fq>>>,
++        ) -> IRStmt<ExprOrTemp<Cow<'a, Expression<Fq>>>> {
++            let ExprOrTemp::Expr(value) = spread else {
++                return IRStmt::comment("no determinism axiom for temporary spread");
++            };
++            let Some(query) = advice(value) else {
++                return IRStmt::comment("determinism axiom unavailable");
++            };
++            let values = [
++                Expression::Advice(query.clone()),
++                AdviceQuery::query_expr(query.column_index(), query.rotation().0 + 1),
++                AdviceQuery::query_expr(query.column_index(), query.rotation().0 + 2),
++            ];
++            (0..3)
++                .flat_map(|x| (0..3).flat_map(move |y| (0..3).map(move |z| (x, y, z))))
++                .map(|(x, y, z)| {
++                    let linear = values[x].clone()
++                        + Expression::Constant(Fq::from(2)) * values[y].clone()
++                        + Expression::Constant(Fq::from(4)) * values[z].clone();
++                    IRStmt::assert(IRBexpr::det(linear).implies(
++                        IRBexpr::det(values[x].clone())
++                            & IRBexpr::det(values[y].clone())
++                            & IRBexpr::det(values[z].clone()),
++                    ))
++                    .map(&mut Cow::Owned)
++                    .map(&mut ExprOrTemp::Expr)
++                })
++                .collect()
++        }
++    }
++
++    impl LookupCallbacks<Fq, Expression<Fq>> for Sha3LookupCallbacks {
++        fn on_lookup<'a>(
++            &self,
++            l: &'a Lookup<Expression<Fq>>,
++            _: &dyn LookupTableGenerator<Fq>,
++            temps: &mut Temps,
++        ) -> LookupResult<'a, Expression<Fq>> {
++            let mode = Self::mode(l.name()).ok_or_else(|| Error::Name(l.name().to_owned()))?;
++            Self::check(mode, l)?;
++            let (tag_value, dense, spread) = Self::parts(mode, l, temps);
++            let disable = match dense {
++                ExprOrTemp::Temp(_) => !IRBexpr::eq(spread.clone(), owned(0)),
++                ExprOrTemp::Expr(_) => {
++                    !IRBexpr::eq(spread.clone(), owned(0)).and(IRBexpr::eq(dense.clone(), owned(0)))
++                }
++            };
++            let mut result = [
++                Self::bounds(tag_value, dense.clone(), spread.clone()),
++                Self::call("Spread", dense.clone(), spread.clone(), temps),
++                Self::call("Unspread", spread.clone(), dense, temps),
++                Self::determinism(&spread),
++            ]
++            .emit_unless_false(disable);
++            result.meta_mut().at_lookup(l.name(), l.idx(), None);
++            result.propagate_meta();
++            Ok(result)
++        }
++    }
++
++    fn expr<'a>(value: &'a Expression<Fq>) -> ExprOrTemp<Cow<'a, Expression<Fq>>> {
++        ExprOrTemp::Expr(Cow::Borrowed(value))
++    }
++    fn owned(value: u64) -> ExprOrTemp<Cow<'static, Expression<Fq>>> {
++        ExprOrTemp::Expr(Cow::Owned(Expression::from(value)))
++    }
++    fn temp<'a>(temps: &mut Temps) -> ExprOrTemp<Cow<'a, Expression<Fq>>> {
++        ExprOrTemp::Temp(temps.next().unwrap())
++    }
++    fn advice(value: &Expression<Fq>) -> Option<AdviceQuery> {
++        match value {
++            Expression::Advice(q) => Some(q.clone()),
++            Expression::Product(a, b) if matches!(a.as_ref(), Expression::Selector(_)) => advice(b),
++            _ => None,
++        }
++    }
++    fn tag(value: &Expression<Fq>, expected: u64) -> Result<(), Error> {
++        let actual = value
++            .evaluate(
++                &|x| Some(x),
++                &|_| Some(Fq::ONE),
++                &|_| None,
++                &|_| None,
++                &|_| None,
++                &|_| None,
++                &|x| x.map(|y| -y),
++                &|a, b| a.zip(b).map(|(x, y)| x + y),
++                &|a, b| a.zip(b).map(|(x, y)| x * y),
++                &|a, b| a.map(|x| x * b),
++            )
++            .ok_or(Error::Tag)?;
++        if actual == Fq::from(expected) {
++            Ok(())
++        } else {
++            Err(Error::Tag)
++        }
++    }
++
++    #[derive(Debug)]
++    enum Error {
++        Inputs,
++        Tag,
++        Name(String),
++    }
++
++    impl std::fmt::Display for Error {
++        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++            match self {
++                Self::Inputs => write!(f, "unexpected lookup inputs"),
++                Self::Tag => write!(f, "unexpected lookup tag"),
++                Self::Name(name) => write!(f, "no callback for lookup {name}"),
++            }
++        }
++    }
++
++    impl std::error::Error for Error {}
++}
+diff --git a/src/packed_chip/keccakf_operations/compute_theta_rho.rs b/src/packed_chip/keccakf_operations/compute_theta_rho.rs
+index 17fb0ec..ff1c41e 100644
+--- a/src/packed_chip/keccakf_operations/compute_theta_rho.rs
++++ b/src/packed_chip/keccakf_operations/compute_theta_rho.rs
+@@ -188,7 +188,9 @@ impl<F: PrimeField> PackedChip<F> {
+                     theta_offset + 3 * k + 1,
+                 )?;
+                 assigned_cs.cs[(i + KECCAK_WIDTH - 1) % KECCAK_WIDTH].copy_advice(
+-                    || format!("copy c {}", i - 1),
++                    // Causes an underflow error during extraction.
++                    //|| format!("copy c {}", i - 1),
++                    || format!("copy c {}", i),
+                     region,
+                     self.config().lc_subconfig.advice[1],
+                     theta_offset + 3 * k + 1,
+diff --git a/src/packed_chip/keccakf_operations/types.rs b/src/packed_chip/keccakf_operations/types.rs
+index 1370ae4..1244b8c 100644
+--- a/src/packed_chip/keccakf_operations/types.rs
++++ b/src/packed_chip/keccakf_operations/types.rs
+@@ -39,7 +39,15 @@ impl KeccakState {
+ 
+ /// Struct representing an assigned Keccak state. This is the assigned variant
+ /// of [`KeccakState`].
+-#[derive(Clone, Debug)]
++#[derive(
++    Clone,
++    Debug,
++    picus::DecomposeInCells,
++    picus::CellReprSize,
++    picus::LoadFromCells,
++    picus::StoreIntoCells,
++)]
++#[cell(midnight_proofs::circuit::Cell)]
+ pub struct AssignedKeccakState<F: PrimeField> {
+     pub(crate) inner: [[AssignedSpreadBits<F>; KECCAK_WIDTH]; KECCAK_WIDTH],
+ }
+diff --git a/src/packed_chip/mod.rs b/src/packed_chip/mod.rs
+index 02d103b..9f97ca0 100644
+--- a/src/packed_chip/mod.rs
++++ b/src/packed_chip/mod.rs
+@@ -612,12 +612,66 @@ impl<F: PrimeField> PackedChip<F> {
+     }
+ }
+ 
++#[cfg(feature = "extraction")]
++impl<F, L> picus::core::circuit::ExtraibleChip<L> for PackedChip<F>
++where
++    F: PrimeField,
++    L: Layouter<F>,
++{
++    // Type that is generated from the ConstraintSystem, usually the Chip's config.
++    type Config = PackedConfig;
++
++    // Any external arguments the chip may need. If the chip does not have any then
++    // a 0-tuple is sufficient.
++    type Args = ();
++
++    // Any type that is part of the configuration that could be potentially shared with other chips.
++    type ConfigCols = (
++        Column<Fixed>,
++        [Column<Advice>; PACKED_ADVICE_COLS],
++        [Column<Fixed>; PACKED_FIXED_COLS],
++    );
++
++    // These two types are required because mdnt-support does not have a dependency on any
++    // halo2 library. We need to declare what types are used as ConstraintSystem and as Error.
++    // Usually these will be the types `<halo2-crate>::plonk::{ConstraintSystem, Error}`.
++    type CS = ConstraintSystem<F>;
++    type Error = Error;
++
++    /// Initializes a new chip with the given config and arguments, if any.
++    fn new_chip(config: &Self::Config, _: Self::Args) -> Self {
++        Self::new(config)
++    }
++
++    /// Creates a new configuration.
++    fn configure_circuit(
++        meta: &mut Self::CS,
++        (constant_column, advice_columns, fixed_columns): &Self::ConfigCols,
++    ) -> Self::Config {
++        Self::configure(meta, *constant_column, *advice_columns, *fixed_columns)
++    }
++
++    /// Performs any required loading, such as lookup tables.
++    /// This method is called by the extractor after the harness' method has been executed.
++    fn load_chip(&self, layouter: &mut L, _: &Self::Config) -> Result<(), Self::Error> {
++        self.load_table(layouter)
++    }
++}
++
+ /// Struct represenging an assigned block of absorbed bytes. It consists of
+ ///
+ /// - the 136 absorbed bytes in dense form
+ /// - the 17 absorbed lane in spread form
+ /// - an assigned value of zero that can be copied to fill up the block
+-#[derive(Clone, Debug)]
++#[derive(
++    Clone,
++    Debug,
++    picus::DecomposeInCells,
++    picus::CellReprSize,
++    picus::LoadFromCells,
++    picus::StoreIntoCells,
++)]
++#[cell(midnight_proofs::circuit::Cell)]
+ pub struct AbsorbedBlock<F: PrimeField> {
+     dense_bytes: [AssignedDenseBits<F>; KECCAK_ABSORB_BYTES],
+     spread_lanes: [AssignedSpreadBits<F>; KECCAK_ABSORB_LANES],
+@@ -773,10 +827,11 @@ impl<F: PrimeField> Keccackf1600Instructions<F> for PackedChip<F> {
+         unimplemented!()
+     }
+ 
++    #[picus::group]
+     fn keccakf(
+         &self,
+         layouter: &mut impl Layouter<F>,
+-        state: &Self::State,
++        #[input] state: &Self::State,
+     ) -> Result<Self::State, Error> {
+         layouter.assign_region(
+             || "keccakf permutation region",
+@@ -789,11 +844,12 @@ impl<F: PrimeField> Keccackf1600Instructions<F> for PackedChip<F> {
+         )
+     }
+ 
++    #[picus::group]
+     fn keccakf_and_absorb(
+         &self,
+         layouter: &mut impl Layouter<F>,
+-        state: &Self::State,
+-        ms: Option<&Self::AbsorbedBlock>,
++        #[input] state: &Self::State,
++        #[input] ms: Option<&Self::AbsorbedBlock>,
+     ) -> Result<Self::State, Error> {
+         layouter.assign_region(
+             || "keccakf permutation with absorb region",
+@@ -811,10 +867,11 @@ impl<F: PrimeField> Keccackf1600Instructions<F> for PackedChip<F> {
+         )
+     }
+ 
++    #[picus::group]
+     fn squeeze(
+         &self,
+         layouter: &mut impl Layouter<F>,
+-        state: &Self::State,
++        #[input] state: &Self::State,
+     ) -> Result<Self::Digest, Error> {
+         let result = layouter.assign_region(
+             || "keccakf squeeze region",
+@@ -835,3 +892,396 @@ impl<F: PrimeField> Keccackf1600Instructions<F> for PackedChip<F> {
+         Ok(digest)
+     }
+ }
++
++#[cfg(feature = "extraction")]
++pub fn extract_assign_message_block(
++    extractor: &picus::extractor::extractor::Extractor,
++) -> picus::extractor::Output {
++    use midnight_curves::Fq as F;
++    use midnight_proofs::{
++        circuit::{Cell, RegionIndex},
++        plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
++    };
++    use picus::{
++        core::circuit::{AbstractCircuitIO, NoChipArgs},
++        extractor::circuit::{AbstractCircuit, Function},
++    };
++
++    struct Circuit;
++
++    impl AbstractCircuitIO for Circuit {
++        type Chip = PackedChip<F>;
++        type Input = [<PackedChip<F> as Keccackf1600Instructions<F>>::AssignedByte; 136];
++        type Output = AbsorbedBlock<F>;
++        type Config = PackedConfig;
++        type ConfigCols = (
++            Column<Fixed>,
++            [Column<Advice>; PACKED_ADVICE_COLS],
++            [Column<Fixed>; PACKED_FIXED_COLS],
++        );
++    }
++
++    impl AbstractCircuit<F> for Circuit {
++        type Error = Error;
++        type Expression = Expression<F>;
++        type Cell = Cell;
++        type RegionIndex = RegionIndex;
++
++        fn synthesize<L>(
++            &self,
++            chip: &Self::Chip,
++            layouter: &mut picus::core::layouter::LayoutAdaptor<L>,
++            block: Self::Input,
++            _: &mut picus::ir::inject::InjectedIR<RegionIndex, Self::Expression>,
++        ) -> Result<Self::Output, Self::Error>
++        where
++            L: picus::core::layouter::Layouter<F, Self::Error>
++                + picus::core::groups::RegionsGroupHooks<F, Self::Cell, Error = Self::Error>,
++        {
++            chip.assign_message_block(layouter, &block.map(|byte| byte.value().cloned()))
++        }
++    }
++
++    impl NoChipArgs for Circuit {}
++
++    let circuit = extractor
++        .make_circuit::<F, _, Function, midnight_proofs::ExtractionSupport, ConstraintSystem<F>>(
++            Circuit,
++        );
++    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
++    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++}
++
++#[cfg(feature = "extraction")]
++picus::register_harness!(
++    "keccakf/assign_message_block/packed/byte",
++    extract_assign_message_block
++);
++
++#[cfg(feature = "extraction")]
++pub fn extract_initialize_and_absorb(
++    extractor: &picus::extractor::extractor::Extractor,
++) -> picus::extractor::Output {
++    use midnight_curves::Fq as F;
++    use midnight_proofs::{
++        circuit::{Cell, RegionIndex},
++        plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
++    };
++    use picus::{
++        core::circuit::{AbstractCircuitIO, NoChipArgs},
++        extractor::circuit::{AbstractCircuit, Function},
++    };
++
++    struct Circuit;
++
++    impl AbstractCircuitIO for Circuit {
++        type Chip = PackedChip<F>;
++        type Input = AbsorbedBlock<F>;
++        type Output = <PackedChip<F> as Keccackf1600Instructions<F>>::State;
++        type Config = PackedConfig;
++        type ConfigCols = (
++            Column<Fixed>,
++            [Column<Advice>; PACKED_ADVICE_COLS],
++            [Column<Fixed>; PACKED_FIXED_COLS],
++        );
++    }
++
++    impl AbstractCircuit<F> for Circuit {
++        type Error = Error;
++        type Expression = Expression<F>;
++        type Cell = Cell;
++        type RegionIndex = RegionIndex;
++
++        fn synthesize<L>(
++            &self,
++            chip: &Self::Chip,
++            layouter: &mut picus::core::layouter::LayoutAdaptor<L>,
++            block: Self::Input,
++            _: &mut picus::ir::inject::InjectedIR<RegionIndex, Self::Expression>,
++        ) -> Result<Self::Output, Self::Error>
++        where
++            L: picus::core::layouter::Layouter<F, Self::Error>
++                + picus::core::groups::RegionsGroupHooks<F, Self::Cell, Error = Self::Error>,
++        {
++            chip.initialize_and_absorb(layouter, &block)
++        }
++    }
++
++    impl NoChipArgs for Circuit {}
++
++    let circuit = extractor
++        .make_circuit::<F, _, Function, midnight_proofs::ExtractionSupport, ConstraintSystem<F>>(
++            Circuit,
++        );
++    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
++    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++}
++
++#[cfg(feature = "extraction")]
++picus::register_harness!(
++    "keccakf/initialize_and_absorb/packed/byte",
++    extract_initialize_and_absorb
++);
++
++#[cfg(feature = "extraction")]
++pub fn extract_keccakf(
++    extractor: &picus::extractor::extractor::Extractor,
++) -> picus::extractor::Output {
++    use midnight_curves::Fq as F;
++    use midnight_proofs::{
++        circuit::{Cell, RegionIndex},
++        plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
++    };
++    use picus::{
++        core::circuit::{AbstractCircuitIO, NoChipArgs},
++        extractor::circuit::{AbstractCircuit, Function},
++    };
++
++    type State = <PackedChip<F> as Keccackf1600Instructions<F>>::State;
++
++    struct Circuit;
++
++    impl AbstractCircuitIO for Circuit {
++        type Chip = PackedChip<F>;
++        type Input = State;
++        type Output = State;
++        type Config = PackedConfig;
++        type ConfigCols = (
++            Column<Fixed>,
++            [Column<Advice>; PACKED_ADVICE_COLS],
++            [Column<Fixed>; PACKED_FIXED_COLS],
++        );
++    }
++
++    impl AbstractCircuit<F> for Circuit {
++        type Error = Error;
++        type Expression = Expression<F>;
++        type Cell = Cell;
++        type RegionIndex = RegionIndex;
++
++        fn synthesize<L>(
++            &self,
++            chip: &Self::Chip,
++            layouter: &mut picus::core::layouter::LayoutAdaptor<L>,
++            state: Self::Input,
++            _: &mut picus::ir::inject::InjectedIR<RegionIndex, Self::Expression>,
++        ) -> Result<Self::Output, Self::Error>
++        where
++            L: picus::core::layouter::Layouter<F, Self::Error>
++                + picus::core::groups::RegionsGroupHooks<F, Self::Cell, Error = Self::Error>,
++        {
++            chip.keccakf(layouter, &state)
++        }
++    }
++
++    impl NoChipArgs for Circuit {}
++
++    let circuit = extractor
++        .make_circuit::<F, _, Function, midnight_proofs::ExtractionSupport, ConstraintSystem<F>>(
++            Circuit,
++        );
++    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
++    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++}
++
++#[cfg(feature = "extraction")]
++picus::register_harness!("keccakf/keccakf/packed/byte", extract_keccakf);
++
++#[cfg(feature = "extraction")]
++pub fn extract_keccakf_and_absorb_none(
++    extractor: &picus::extractor::extractor::Extractor,
++) -> picus::extractor::Output {
++    use midnight_curves::Fq as F;
++    use midnight_proofs::{
++        circuit::{Cell, RegionIndex},
++        plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
++    };
++    use picus::{
++        core::circuit::{AbstractCircuitIO, NoChipArgs},
++        extractor::circuit::{AbstractCircuit, Function},
++    };
++
++    type State = <PackedChip<F> as Keccackf1600Instructions<F>>::State;
++
++    struct Circuit;
++
++    impl AbstractCircuitIO for Circuit {
++        type Chip = PackedChip<F>;
++        type Input = State;
++        type Output = State;
++        type Config = PackedConfig;
++        type ConfigCols = (
++            Column<Fixed>,
++            [Column<Advice>; PACKED_ADVICE_COLS],
++            [Column<Fixed>; PACKED_FIXED_COLS],
++        );
++    }
++
++    impl AbstractCircuit<F> for Circuit {
++        type Error = Error;
++        type Expression = Expression<F>;
++        type Cell = Cell;
++        type RegionIndex = RegionIndex;
++
++        fn synthesize<L>(
++            &self,
++            chip: &Self::Chip,
++            layouter: &mut picus::core::layouter::LayoutAdaptor<L>,
++            state: Self::Input,
++            _: &mut picus::ir::inject::InjectedIR<RegionIndex, Self::Expression>,
++        ) -> Result<Self::Output, Self::Error>
++        where
++            L: picus::core::layouter::Layouter<F, Self::Error>
++                + picus::core::groups::RegionsGroupHooks<F, Self::Cell, Error = Self::Error>,
++        {
++            chip.keccakf_and_absorb(layouter, &state, None)
++        }
++    }
++
++    impl NoChipArgs for Circuit {}
++
++    let circuit = extractor
++        .make_circuit::<F, _, Function, midnight_proofs::ExtractionSupport, ConstraintSystem<F>>(
++            Circuit,
++        );
++    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
++    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++}
++
++#[cfg(feature = "extraction")]
++picus::register_harness!(
++    "keccakf/keccakf_and_absorb_none/packed/byte",
++    extract_keccakf_and_absorb_none
++);
++
++#[cfg(feature = "extraction")]
++pub fn extract_keccakf_and_absorb_some(
++    extractor: &picus::extractor::extractor::Extractor,
++) -> picus::extractor::Output {
++    use midnight_curves::Fq as F;
++    use midnight_proofs::{
++        circuit::{Cell, RegionIndex},
++        plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
++    };
++    use picus::{
++        core::circuit::{AbstractCircuitIO, NoChipArgs},
++        extractor::circuit::{AbstractCircuit, Function},
++    };
++
++    type State = <PackedChip<F> as Keccackf1600Instructions<F>>::State;
++
++    struct Circuit;
++
++    impl AbstractCircuitIO for Circuit {
++        type Chip = PackedChip<F>;
++        type Input = (State, AbsorbedBlock<F>);
++        type Output = State;
++        type Config = PackedConfig;
++        type ConfigCols = (
++            Column<Fixed>,
++            [Column<Advice>; PACKED_ADVICE_COLS],
++            [Column<Fixed>; PACKED_FIXED_COLS],
++        );
++    }
++
++    impl AbstractCircuit<F> for Circuit {
++        type Error = Error;
++        type Expression = Expression<F>;
++        type Cell = Cell;
++        type RegionIndex = RegionIndex;
++
++        fn synthesize<L>(
++            &self,
++            chip: &Self::Chip,
++            layouter: &mut picus::core::layouter::LayoutAdaptor<L>,
++            (state, block): Self::Input,
++            _: &mut picus::ir::inject::InjectedIR<RegionIndex, Self::Expression>,
++        ) -> Result<Self::Output, Self::Error>
++        where
++            L: picus::core::layouter::Layouter<F, Self::Error>
++                + picus::core::groups::RegionsGroupHooks<F, Self::Cell, Error = Self::Error>,
++        {
++            chip.keccakf_and_absorb(layouter, &state, Some(&block))
++        }
++    }
++
++    impl NoChipArgs for Circuit {}
++
++    let circuit = extractor
++        .make_circuit::<F, _, Function, midnight_proofs::ExtractionSupport, ConstraintSystem<F>>(
++            Circuit,
++        );
++    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
++    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++}
++
++#[cfg(feature = "extraction")]
++picus::register_harness!(
++    "keccakf/keccakf_and_absorb_some/packed/byte",
++    extract_keccakf_and_absorb_some
++);
++
++#[cfg(feature = "extraction")]
++pub fn extract_squeeze(
++    extractor: &picus::extractor::extractor::Extractor,
++) -> picus::extractor::Output {
++    use midnight_curves::Fq as F;
++    use midnight_proofs::{
++        circuit::{Cell, RegionIndex},
++        plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed},
++    };
++    use picus::{
++        core::circuit::{AbstractCircuitIO, NoChipArgs},
++        extractor::circuit::{AbstractCircuit, Function},
++    };
++
++    type State = <PackedChip<F> as Keccackf1600Instructions<F>>::State;
++    type Digest = <PackedChip<F> as Keccackf1600Instructions<F>>::Digest;
++
++    struct Circuit;
++
++    impl AbstractCircuitIO for Circuit {
++        type Chip = PackedChip<F>;
++        type Input = State;
++        type Output = Digest;
++        type Config = PackedConfig;
++        type ConfigCols = (
++            Column<Fixed>,
++            [Column<Advice>; PACKED_ADVICE_COLS],
++            [Column<Fixed>; PACKED_FIXED_COLS],
++        );
++    }
++
++    impl AbstractCircuit<F> for Circuit {
++        type Error = Error;
++        type Expression = Expression<F>;
++        type Cell = Cell;
++        type RegionIndex = RegionIndex;
++
++        fn synthesize<L>(
++            &self,
++            chip: &Self::Chip,
++            layouter: &mut picus::core::layouter::LayoutAdaptor<L>,
++            state: Self::Input,
++            _: &mut picus::ir::inject::InjectedIR<RegionIndex, Self::Expression>,
++        ) -> Result<Self::Output, Self::Error>
++        where
++            L: picus::core::layouter::Layouter<F, Self::Error>
++                + picus::core::groups::RegionsGroupHooks<F, Self::Cell, Error = Self::Error>,
++        {
++            chip.squeeze(layouter, &state)
++        }
++    }
++
++    impl NoChipArgs for Circuit {}
++
++    let circuit = extractor
++        .make_circuit::<F, _, Function, midnight_proofs::ExtractionSupport, ConstraintSystem<F>>(
++            Circuit,
++        );
++    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
++    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++}
++
++#[cfg(feature = "extraction")]
++picus::register_harness!("keccakf/squeeze/packed/byte", extract_squeeze);
+diff --git a/src/sha3_256_gadget.rs b/src/sha3_256_gadget.rs
+index 2a0ceb3..77677f1 100644
+--- a/src/sha3_256_gadget.rs
++++ b/src/sha3_256_gadget.rs
+@@ -5,6 +5,7 @@ use midnight_proofs::{
+     circuit::{AssignedCell, Chip, Layouter, Value},
+     plonk::Error,
+ };
++use picus::core::circuit::ExtraibleChip;
+ 
+ use crate::{
+     constants::KECCAK_ABSORB_BYTES, instructions::Keccackf1600Instructions, packed_chip::PackedChip,
+@@ -230,6 +231,132 @@ where
+     }
+ }
+ 
++impl<F, KeccakF, L, Config> ExtraibleChip<L> for Sha3_256<F, KeccakF>
++where
++    F: PrimeField,
++    KeccakF:
++        Keccackf1600Instructions<F> + ExtraibleChip<L, Config = Config> + Chip<F, Config = Config>,
++    L: Layouter<F>,
++    KeccakF::Loaded: Default,
++    Config: Clone + std::fmt::Debug,
++{
++    type Config = Config;
++
++    type Args = KeccakF::Args;
++
++    type ConfigCols = KeccakF::ConfigCols;
++
++    type CS = KeccakF::CS;
++
++    type Error = KeccakF::Error;
++
++    fn new_chip(config: &Self::Config, args: Self::Args) -> Self {
++        Self::new(KeccakF::new_chip(config, args))
++    }
++
++    fn configure_circuit(meta: &mut Self::CS, columns: &Self::ConfigCols) -> Self::Config {
++        KeccakF::configure_circuit(meta, columns)
++    }
++
++    fn load_chip(&self, layouter: &mut L, config: &Self::Config) -> Result<(), Self::Error> {
++        self.chip.load_chip(layouter, config)
++    }
++}
++
++#[cfg(feature = "extraction")]
++pub fn extract_sha3_digest_1(
++    extractor: &picus::extractor::extractor::Extractor,
++) -> picus::extractor::Output {
++    use midnight_curves::Fq as F;
++    use midnight_proofs::{
++        circuit::{AssignedCell, Cell, RegionIndex},
++        plonk::{Advice, Column, ConstraintSystem, Expression, Fixed},
++    };
++    use num_bigint::BigUint;
++    use picus::{
++        cell_to_expr,
++        core::circuit::{AbstractCircuitIO, NoChipArgs},
++        extractor::circuit::{AbstractCircuit, Function},
++        ir::stmt::IRStmt,
++    };
++
++    use crate::packed_chip::{PackedChip, PackedConfig, PACKED_ADVICE_COLS, PACKED_FIXED_COLS};
++
++    type InputByte = AssignedCell<F, F>;
++    type PackedByte = <PackedChip<F> as Keccackf1600Instructions<F>>::AssignedByte;
++    type Digest = <PackedChip<F> as Keccackf1600Instructions<F>>::Digest;
++
++    struct Circuit;
++
++    impl AbstractCircuitIO for Circuit {
++        type Chip = Sha3_256<F, PackedChip<F>>;
++        type Input = [InputByte; 1];
++        type Output = ([PackedByte; 1], Digest);
++        type Config = PackedConfig;
++        type ConfigCols = (
++            Column<Fixed>,
++            [Column<Advice>; PACKED_ADVICE_COLS],
++            [Column<Fixed>; PACKED_FIXED_COLS],
++        );
++    }
++
++    impl AbstractCircuit<F> for Circuit {
++        type Error = Error;
++        type Expression = Expression<F>;
++        type Cell = Cell;
++        type RegionIndex = RegionIndex;
++
++        fn synthesize<L>(
++            &self,
++            chip: &Self::Chip,
++            layouter: &mut picus::core::layouter::LayoutAdaptor<L>,
++            hash_input: Self::Input,
++            injected_ir: &mut picus::ir::inject::InjectedIR<RegionIndex, Self::Expression>,
++        ) -> Result<Self::Output, Self::Error>
++        where
++            L: picus::core::layouter::Layouter<F, Self::Error>
++                + picus::core::groups::RegionsGroupHooks<F, Self::Cell, Error = Self::Error>,
++        {
++            let input_cell = hash_input[0].cell();
++            injected_ir.entry(input_cell.region_index).or_default().push(
++                IRStmt::lt(cell_to_expr!(&hash_input[0], F)?, Expression::from(256))
++                    .with(input_cell.row_offset),
++            );
++
++            let input = hash_input.clone().map(|byte| {
++                byte.value().map(|value| {
++                    let value = BigUint::from_bytes_le(value.to_repr().as_ref());
++                    assert!(value < BigUint::from(256u16));
++                    value.to_bytes_le().first().copied().unwrap_or(0)
++                })
++            });
++            let (bytes, digest) = chip.digest(layouter, &input)?;
++            let bytes: [PackedByte; 1] = bytes
++                .try_into()
++                .map_err(|_| Error::Synthesis("expected one digest input byte".into()))?;
++
++            layouter.assign_region(
++                || "link inputs",
++                |mut region| region.constrain_equal(bytes[0].cell(), hash_input[0].cell()),
++            )?;
++
++            Ok((bytes, digest))
++        }
++    }
++
++    impl NoChipArgs for Circuit {}
++
++    let circuit = extractor
++        .make_circuit::<F, _, Function, midnight_proofs::ExtractionSupport, ConstraintSystem<F>>(
++            Circuit,
++        );
++    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
++    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++}
++
++#[cfg(feature = "extraction")]
++picus::register_harness!("sha3/digest_1/sha3/byte", extract_sha3_digest_1);
++
+ /// A wrapper gadget that computs a Keccak_256 digest.
+ #[derive(Debug, Clone)]
+ pub struct Keccak256<F, KeccakF>
