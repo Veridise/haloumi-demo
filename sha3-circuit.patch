@@ -1,17 +1,16 @@
 diff --git a/.haloumi/cfg.toml b/.haloumi/cfg.toml
 new file mode 100644
-index 0000000..1188494
+index 0000000..a680fd1
 --- /dev/null
 +++ b/.haloumi/cfg.toml
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,18 @@
 +[extractor]
 +preludes = ["spread"]
 +
 +[extractor.dependency]
 +git = "https://github.com/project-llzk/haloumi"
-+branch = "shankara/gate-callbacks-cli2"
++branch = "shankara/gate-callbacks-on-cli2"
 +package = "haloumi-extractor-runner"
-+features = ["llzk-backend"]
 +
 +[target]
 +features = ["extraction"]
@@ -25,7 +24,7 @@ index 0000000..1188494
 +field = "bls12"
 diff --git a/.haloumi/specs/midnight-proofs.toml b/.haloumi/specs/midnight-proofs.toml
 new file mode 100644
-index 0000000..d30f073
+index 0000000..1835abe
 --- /dev/null
 +++ b/.haloumi/specs/midnight-proofs.toml
 @@ -0,0 +1,314 @@
@@ -34,7 +33,7 @@ index 0000000..d30f073
 +
 +[dependencies.haloumi-integration]
 +git = "https://github.com/project-llzk/haloumi"
-+branch = "shankara/gate-callbacks-cli2"
++branch = "shankara/gate-callbacks-on-cli2"
 +package = "haloumi-integration"
 +features = ["derive"]
 +
@@ -1298,14 +1297,14 @@ index 7e24477..b1c6b69 100644
 + "syn 2.0.111",
  ]
 diff --git a/Cargo.toml b/Cargo.toml
-index 0568537..7a9a57c 100644
+index 0568537..d645c56 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -19,6 +19,7 @@ num-bigint = { version = "0.4" }
  rand = "0.8"
  blake2b_simd = "1.0.3"
  ff = "0.13"
-+picus = { package = "haloumi-integration", git = "https://github.com/project-llzk/haloumi", branch = "shankara/gate-callbacks-cli2", features = ["extractor", "derive"] }
++picus = { package = "haloumi-integration", git = "https://github.com/project-llzk/haloumi", branch = "shankara/gate-callbacks-on-cli2", features = ["extractor", "derive"] }
  
  [dev-dependencies]
  criterion = "0.3"
@@ -1317,10 +1316,10 @@ index 0568537..7a9a57c 100644
 +default = []
 +extraction = []
 diff --git a/src/lib.rs b/src/lib.rs
-index fd0799a..850726c 100644
+index fd0799a..096eb4d 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -7,3 +7,442 @@ pub mod sha3_256_gadget;
+@@ -7,3 +7,457 @@ pub mod sha3_256_gadget;
  
  /// Number of bytes in a digest of Keccak.
  pub use constants::KECCAK_SQUEEZE_BYTES;
@@ -1345,7 +1344,7 @@ index fd0799a..850726c 100644
 +mod lookup_callbacks {
 +    //! Lookup callbacks used by the SHA-3 extraction harnesses.
 +
-+    use std::{borrow::Cow, cell::RefCell};
++    use std::{borrow::Cow, cell::RefCell, collections::HashSet};
 +
 +    use ff::Field;
 +    use midnight_curves::Fq;
@@ -1488,8 +1487,9 @@ index fd0799a..850726c 100644
 +        ) -> LookupResult<'a, Expression<Fq>> {
 +            let mode = Self::mode(l.name()).ok_or_else(|| Error::Name(l.name().to_owned()))?;
 +            Self::check(mode, l)?;
-+            // The lookup only applies where its selector is on. The selector is resolved per
-+            // row, so the condition folds: the block is dropped or emitted unconditionally.
++            // The lookup only applies where its selector is on. The selector is resolved
++            // per row, so the condition folds: the block is dropped or emitted
++            // unconditionally.
 +            let enabled = !IRBexpr::eq(selector(l)?, owned(0));
 +            let (tag_value, dense, spread) = Self::parts(mode, l, temps);
 +            let mut result = [
@@ -1513,13 +1513,18 @@ index fd0799a..850726c 100644
 +    fn temp<'a>(temps: &mut Temps) -> ExprOrTemp<Cow<'a, Expression<Fq>>> {
 +        ExprOrTemp::Temp(temps.next().unwrap())
 +    }
-+    /// Returns the selector that enables the lookup; its inputs must use exactly one.
-+    fn selector(l: &Lookup<Expression<Fq>>) -> Result<ExprOrTemp<Cow<'static, Expression<Fq>>>, Error> {
-+        let found = RefCell::new(Vec::new());
++    /// Returns the selector that enables the lookup; its inputs must use
++    /// exactly one.
++    fn selector(
++        l: &Lookup<Expression<Fq>>,
++    ) -> Result<ExprOrTemp<Cow<'static, Expression<Fq>>>, Error> {
++        let found = RefCell::new(HashSet::new());
 +        for input in l.inputs() {
 +            input.evaluate(
 +                &|_| (),
-+                &|s| found.borrow_mut().push(s),
++                &|s| {
++                    found.borrow_mut().insert(s);
++                },
 +                &|_| (),
 +                &|_| (),
 +                &|_| (),
@@ -1530,10 +1535,9 @@ index fd0799a..850726c 100644
 +                &|_, _| (),
 +            );
 +        }
-+        let mut found = found.into_inner();
-+        found.dedup();
-+        match found.as_slice() {
-+            [s] => Ok(ExprOrTemp::Expr(Cow::Owned(Expression::Selector(*s)))),
++        let found = found.into_inner();
++        match found.iter().collect::<Vec<_>>().as_slice() {
++            [s] => Ok(ExprOrTemp::Expr(Cow::Owned(Expression::Selector(**s)))),
 +            _ => Err(Error::Selector),
 +        }
 +    }
@@ -1585,11 +1589,12 @@ index fd0799a..850726c 100644
 +mod gate_callbacks {
 +    //! Gate callbacks used by the SHA-3 extraction harnesses.
 +    //!
-+    //! The bootstrap gate `acc[r+1] = 2·acc[r] + part[r+1]` splits a noisy spread word into
-+    //! clean parts. Each digit of `part` is 0 or 1 (lookup-checked limbs) and each digit of `acc`
-+    //! is at most 3, so every digit `2·d_acc + d_part` stays below 8 and decodes uniquely. Range
-+    //! bounds cannot express that, so on every enabled row we state it as an axiom:
-+    //! `det(acc[r+1]) → det(acc[r]) ∧ det(part[r+1])`.
++    //! The bootstrap gate `acc[r+1] = 2·acc[r] + part[r+1]` splits a noisy
++    //! spread word into clean parts. Each digit of `part` is 0 or 1
++    //! (lookup-checked limbs) and each digit of `acc` is at most 3, so
++    //! every digit `2·d_acc + d_part` stays below 8 and decodes uniquely. Range
++    //! bounds cannot express that, so on every enabled row we state it as an
++    //! axiom: `det(acc[r+1]) → det(acc[r]) ∧ det(part[r+1])`.
 +
 +    use std::{borrow::Cow, cell::Cell, collections::BTreeMap};
 +
@@ -1598,11 +1603,11 @@ index fd0799a..850726c 100644
 +    use midnight_proofs::plonk::{AdviceQuery, Expression};
 +    use picus::{
 +        core::info_traits::CreateQuery as _,
-+        ir::{CmpOp, expr::IRBexpr, meta::HasMeta as _, stmt::IRStmt},
++        ir::{expr::IRBexpr, meta::HasMeta as _, stmt::IRStmt, CmpOp},
 +        ir_gen::gates::{
-+            GateScope,
 +            callbacks::GateCallbacks,
 +            rewrite::{GateRewritePattern, MatchAndRewriteResult},
++            GateScope,
 +        },
 +    };
 +
@@ -1623,7 +1628,8 @@ index fd0799a..850726c 100644
 +        }
 +    }
 +
-+    /// Emits the bootstrap gate's constraint and its determinism axiom on every enabled row.
++    /// Emits the bootstrap gate's constraint and its determinism axiom on every
++    /// enabled row.
 +    #[derive(Debug, Default)]
 +    struct BootstrapAxioms;
 +
@@ -1665,7 +1671,8 @@ index fd0799a..850726c 100644
 +        }
 +    }
 +
-+    /// The cells of `acc_next - 2·acc - part_next`, read off the gate polynomial.
++    /// The cells of `acc_next - 2·acc - part_next`, read off the gate
++    /// polynomial.
 +    struct BootstrapCells {
 +        acc: Expression<Fq>,
 +        acc_next: Expression<Fq>,
@@ -1673,8 +1680,9 @@ index fd0799a..850726c 100644
 +    }
 +
 +    impl BootstrapCells {
-+        /// Accepts exactly `q · (acc_next - 2·acc - part_next)` with `acc`, `acc_next` in one
-+        /// advice column at rotations 0 and 1 and `part_next` in another at rotation 1.
++        /// Accepts exactly `q · (acc_next - 2·acc - part_next)` with `acc`,
++        /// `acc_next` in one advice column at rotations 0 and 1 and
++        /// `part_next` in another at rotation 1.
 +        fn read(poly: &Expression<Fq>) -> Result<Self, Error> {
 +            let selectors = Cell::new(0);
 +            let (terms, constant) = linear(poly, &selectors).ok_or(Error::Shape)?;
@@ -1695,7 +1703,8 @@ index fd0799a..850726c 100644
 +            if acc_next != (acc.0, 1) || acc.1 != 0 || part_next.1 != 1 || part_next.0 == acc.0 {
 +                return Err(Error::Shape);
 +            }
-+            let query = |(column, rotation): (usize, i32)| AdviceQuery::query_expr(column, rotation);
++            let query =
++                |(column, rotation): (usize, i32)| AdviceQuery::query_expr(column, rotation);
 +            Ok(Self {
 +                acc: query(acc),
 +                acc_next: query(acc_next),
@@ -1704,14 +1713,19 @@ index fd0799a..850726c 100644
 +        }
 +    }
 +
-+    /// Advice cells `(column, rotation)` with their coefficients, plus a constant term.
++    /// Advice cells `(column, rotation)` with their coefficients, plus a
++    /// constant term.
 +    type Linear = (BTreeMap<(usize, i32), Fq>, Fq);
 +
-+    /// Reads `poly` as a linear form over advice cells, treating selectors as 1 and counting them.
-+    /// Returns `None` for anything nonlinear or for fixed, instance or challenge queries.
++    /// Reads `poly` as a linear form over advice cells, treating selectors as 1
++    /// and counting them. Returns `None` for anything nonlinear or for
++    /// fixed, instance or challenge queries.
 +    fn linear(poly: &Expression<Fq>, selectors: &Cell<usize>) -> Option<Linear> {
 +        fn scale((terms, constant): Linear, by: Fq) -> Linear {
-+            (terms.into_iter().map(|(k, c)| (k, c * by)).collect(), constant * by)
++            (
++                terms.into_iter().map(|(k, c)| (k, c * by)).collect(),
++                constant * by,
++            )
 +        }
 +        poly.evaluate(
 +            &|c| Some((BTreeMap::new(), c)),
