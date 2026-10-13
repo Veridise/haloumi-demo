@@ -22,7 +22,7 @@ if ! [ -e haloumi ] ; then
   echo Cloning haloumi...
   git clone https://github.com/project-llzk/haloumi 
   pushd haloumi 
-  git checkout dani/cargo-haloumi-2
+  git checkout shankara/gate-callbacks-cli2
   cat > .envrc <<EOF 
 if ! has nix_direnv_version || ! nix_direnv_version 3.0.4; then
   source_url "https://raw.githubusercontent.com/nix-community/nix-direnv/3.0.4/direnvrc" "sha256-DzlYZ33mWF/Gs8DDeyjr8mnVmQGx7ASYqA5WlxwvBG4="

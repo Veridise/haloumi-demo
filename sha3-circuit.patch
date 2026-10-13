@@ -1,16 +1,17 @@
 diff --git a/.haloumi/cfg.toml b/.haloumi/cfg.toml
 new file mode 100644
-index 0000000..972261a
+index 0000000..1188494
 --- /dev/null
 +++ b/.haloumi/cfg.toml
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,19 @@
 +[extractor]
 +preludes = ["spread"]
 +
 +[extractor.dependency]
 +git = "https://github.com/project-llzk/haloumi"
-+branch = "dani/cargo-haloumi-2"
++branch = "shankara/gate-callbacks-cli2"
 +package = "haloumi-extractor-runner"
++features = ["llzk-backend"]
 +
 +[target]
 +features = ["extraction"]
@@ -24,7 +25,7 @@ index 0000000..972261a
 +field = "bls12"
 diff --git a/.haloumi/specs/midnight-proofs.toml b/.haloumi/specs/midnight-proofs.toml
 new file mode 100644
-index 0000000..bec53a1
+index 0000000..d30f073
 --- /dev/null
 +++ b/.haloumi/specs/midnight-proofs.toml
 @@ -0,0 +1,314 @@
@@ -33,7 +34,7 @@ index 0000000..bec53a1
 +
 +[dependencies.haloumi-integration]
 +git = "https://github.com/project-llzk/haloumi"
-+branch = "dani/cargo-haloumi-2"
++branch = "shankara/gate-callbacks-cli2"
 +package = "haloumi-integration"
 +features = ["derive"]
 +
@@ -1297,14 +1298,14 @@ index 7e24477..b1c6b69 100644
 + "syn 2.0.111",
  ]
 diff --git a/Cargo.toml b/Cargo.toml
-index 0568537..b1377ac 100644
+index 0568537..7a9a57c 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -19,6 +19,7 @@ num-bigint = { version = "0.4" }
  rand = "0.8"
  blake2b_simd = "1.0.3"
  ff = "0.13"
-+picus = { package = "haloumi-integration", git = "https://github.com/project-llzk/haloumi", branch = "dani/cargo-haloumi-2", features = ["extractor", "derive"] }
++picus = { package = "haloumi-integration", git = "https://github.com/project-llzk/haloumi", branch = "shankara/gate-callbacks-cli2", features = ["extractor", "derive"] }
  
  [dev-dependencies]
  criterion = "0.3"
@@ -1316,10 +1317,10 @@ index 0568537..b1377ac 100644
 +default = []
 +extraction = []
 diff --git a/src/lib.rs b/src/lib.rs
-index fd0799a..b773487 100644
+index fd0799a..850726c 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -7,3 +7,276 @@ pub mod sha3_256_gadget;
+@@ -7,3 +7,442 @@ pub mod sha3_256_gadget;
  
  /// Number of bytes in a digest of Keccak.
  pub use constants::KECCAK_SQUEEZE_BYTES;
@@ -1344,13 +1345,12 @@ index fd0799a..b773487 100644
 +mod lookup_callbacks {
 +    //! Lookup callbacks used by the SHA-3 extraction harnesses.
 +
-+    use std::borrow::Cow;
++    use std::{borrow::Cow, cell::RefCell};
 +
 +    use ff::Field;
 +    use midnight_curves::Fq;
-+    use midnight_proofs::plonk::{AdviceQuery, Expression};
++    use midnight_proofs::plonk::Expression;
 +    use picus::{
-+        core::info_traits::CreateQuery as _,
 +        ir::{
 +            expr::IRBexpr,
 +            meta::HasMeta,
@@ -1477,37 +1477,6 @@ index fd0799a..b773487 100644
 +            });
 +            IRStmt::assert(IRBexpr::or_many(std::iter::once(zero).chain(checks)))
 +        }
-+
-+        fn determinism<'a>(
-+            spread: &ExprOrTemp<Cow<'a, Expression<Fq>>>,
-+        ) -> IRStmt<ExprOrTemp<Cow<'a, Expression<Fq>>>> {
-+            let ExprOrTemp::Expr(value) = spread else {
-+                return IRStmt::comment("no determinism axiom for temporary spread");
-+            };
-+            let Some(query) = advice(value) else {
-+                return IRStmt::comment("determinism axiom unavailable");
-+            };
-+            let values = [
-+                Expression::Advice(query.clone()),
-+                AdviceQuery::query_expr(query.column_index(), query.rotation().0 + 1),
-+                AdviceQuery::query_expr(query.column_index(), query.rotation().0 + 2),
-+            ];
-+            (0..3)
-+                .flat_map(|x| (0..3).flat_map(move |y| (0..3).map(move |z| (x, y, z))))
-+                .map(|(x, y, z)| {
-+                    let linear = values[x].clone()
-+                        + Expression::Constant(Fq::from(2)) * values[y].clone()
-+                        + Expression::Constant(Fq::from(4)) * values[z].clone();
-+                    IRStmt::assert(IRBexpr::det(linear).implies(
-+                        IRBexpr::det(values[x].clone())
-+                            & IRBexpr::det(values[y].clone())
-+                            & IRBexpr::det(values[z].clone()),
-+                    ))
-+                    .map(&mut Cow::Owned)
-+                    .map(&mut ExprOrTemp::Expr)
-+                })
-+                .collect()
-+        }
 +    }
 +
 +    impl LookupCallbacks<Fq, Expression<Fq>> for Sha3LookupCallbacks {
@@ -1519,20 +1488,16 @@ index fd0799a..b773487 100644
 +        ) -> LookupResult<'a, Expression<Fq>> {
 +            let mode = Self::mode(l.name()).ok_or_else(|| Error::Name(l.name().to_owned()))?;
 +            Self::check(mode, l)?;
++            // The lookup only applies where its selector is on. The selector is resolved per
++            // row, so the condition folds: the block is dropped or emitted unconditionally.
++            let enabled = !IRBexpr::eq(selector(l)?, owned(0));
 +            let (tag_value, dense, spread) = Self::parts(mode, l, temps);
-+            let disable = match dense {
-+                ExprOrTemp::Temp(_) => !IRBexpr::eq(spread.clone(), owned(0)),
-+                ExprOrTemp::Expr(_) => {
-+                    !IRBexpr::eq(spread.clone(), owned(0)).and(IRBexpr::eq(dense.clone(), owned(0)))
-+                }
-+            };
 +            let mut result = [
 +                Self::bounds(tag_value, dense.clone(), spread.clone()),
 +                Self::call("Spread", dense.clone(), spread.clone(), temps),
-+                Self::call("Unspread", spread.clone(), dense, temps),
-+                Self::determinism(&spread),
++                Self::call("Unspread", spread, dense, temps),
 +            ]
-+            .emit_unless_false(disable);
++            .emit_unless_false(enabled);
 +            result.meta_mut().at_lookup(l.name(), l.idx(), None);
 +            result.propagate_meta();
 +            Ok(result)
@@ -1548,11 +1513,28 @@ index fd0799a..b773487 100644
 +    fn temp<'a>(temps: &mut Temps) -> ExprOrTemp<Cow<'a, Expression<Fq>>> {
 +        ExprOrTemp::Temp(temps.next().unwrap())
 +    }
-+    fn advice(value: &Expression<Fq>) -> Option<AdviceQuery> {
-+        match value {
-+            Expression::Advice(q) => Some(q.clone()),
-+            Expression::Product(a, b) if matches!(a.as_ref(), Expression::Selector(_)) => advice(b),
-+            _ => None,
++    /// Returns the selector that enables the lookup; its inputs must use exactly one.
++    fn selector(l: &Lookup<Expression<Fq>>) -> Result<ExprOrTemp<Cow<'static, Expression<Fq>>>, Error> {
++        let found = RefCell::new(Vec::new());
++        for input in l.inputs() {
++            input.evaluate(
++                &|_| (),
++                &|s| found.borrow_mut().push(s),
++                &|_| (),
++                &|_| (),
++                &|_| (),
++                &|_| (),
++                &|_| (),
++                &|_, _| (),
++                &|_, _| (),
++                &|_, _| (),
++            );
++        }
++        let mut found = found.into_inner();
++        found.dedup();
++        match found.as_slice() {
++            [s] => Ok(ExprOrTemp::Expr(Cow::Owned(Expression::Selector(*s)))),
++            _ => Err(Error::Selector),
 +        }
 +    }
 +    fn tag(value: &Expression<Fq>, expected: u64) -> Result<(), Error> {
@@ -1581,6 +1563,7 @@ index fd0799a..b773487 100644
 +    enum Error {
 +        Inputs,
 +        Tag,
++        Selector,
 +        Name(String),
 +    }
 +
@@ -1589,7 +1572,191 @@ index fd0799a..b773487 100644
 +            match self {
 +                Self::Inputs => write!(f, "unexpected lookup inputs"),
 +                Self::Tag => write!(f, "unexpected lookup tag"),
++                Self::Selector => write!(f, "lookup inputs must use exactly one selector"),
 +                Self::Name(name) => write!(f, "no callback for lookup {name}"),
++            }
++        }
++    }
++
++    impl std::error::Error for Error {}
++}
++
++#[cfg(feature = "extraction")]
++mod gate_callbacks {
++    //! Gate callbacks used by the SHA-3 extraction harnesses.
++    //!
++    //! The bootstrap gate `acc[r+1] = 2·acc[r] + part[r+1]` splits a noisy spread word into
++    //! clean parts. Each digit of `part` is 0 or 1 (lookup-checked limbs) and each digit of `acc`
++    //! is at most 3, so every digit `2·d_acc + d_part` stays below 8 and decodes uniquely. Range
++    //! bounds cannot express that, so on every enabled row we state it as an axiom:
++    //! `det(acc[r+1]) → det(acc[r]) ∧ det(part[r+1])`.
++
++    use std::{borrow::Cow, cell::Cell, collections::BTreeMap};
++
++    use ff::Field;
++    use midnight_curves::Fq;
++    use midnight_proofs::plonk::{AdviceQuery, Expression};
++    use picus::{
++        core::info_traits::CreateQuery as _,
++        ir::{CmpOp, expr::IRBexpr, meta::HasMeta as _, stmt::IRStmt},
++        ir_gen::gates::{
++            GateScope,
++            callbacks::GateCallbacks,
++            rewrite::{GateRewritePattern, MatchAndRewriteResult},
++        },
++    };
++
++    const BOOTSTRAP_GATE: &str = "bootstrap constraint";
++
++    #[derive(Debug, Default)]
++    pub(crate) struct Sha3GateCallbacks {
++        bootstrap: BootstrapAxioms,
++    }
++
++    pub(crate) fn sha3_gate_callbacks() -> Sha3GateCallbacks {
++        Sha3GateCallbacks::default()
++    }
++
++    impl GateCallbacks<Fq, Expression<Fq>> for Sha3GateCallbacks {
++        fn patterns(&self) -> Vec<&dyn GateRewritePattern<Fq, Expression<Fq>>> {
++            vec![&self.bootstrap]
++        }
++    }
++
++    /// Emits the bootstrap gate's constraint and its determinism axiom on every enabled row.
++    #[derive(Debug, Default)]
++    struct BootstrapAxioms;
++
++    impl GateRewritePattern<Fq, Expression<Fq>> for BootstrapAxioms {
++        fn match_and_rewrite<'syn>(
++            &self,
++            gate: GateScope<'syn, '_, Fq, Expression<Fq>>,
++        ) -> MatchAndRewriteResult<'syn, Expression<Fq>> {
++            if gate.gate_name() != BOOTSTRAP_GATE {
++                return Ok(None);
++            }
++            let [poly] = gate.polynomials() else {
++                return Err(Error::Polynomials.into());
++            };
++            let cells = BootstrapCells::read(poly)?;
++            let rows: Vec<_> = gate.enabled_rows(poly).collect();
++            Ok(Some(
++                rows.into_iter()
++                    .flat_map(|row| {
++                        // A matching pattern replaces the fallback lowering, so keep the gate.
++                        let constraint = IRStmt::constraint(
++                            CmpOp::Eq,
++                            Cow::Borrowed(poly),
++                            Cow::Owned(Expression::Constant(Fq::ZERO)),
++                        );
++                        let axiom = IRStmt::assert(
++                            IRBexpr::det(Cow::Owned(cells.acc_next.clone())).implies(
++                                IRBexpr::det(Cow::Owned(cells.acc.clone()))
++                                    & IRBexpr::det(Cow::Owned(cells.part_next.clone())),
++                            ),
++                        );
++                        [constraint, axiom].into_iter().map(move |mut stmt| {
++                            stmt.meta_mut().at_row(row);
++                            stmt.map(&mut |e| (row, e))
++                        })
++                    })
++                    .collect(),
++            ))
++        }
++    }
++
++    /// The cells of `acc_next - 2·acc - part_next`, read off the gate polynomial.
++    struct BootstrapCells {
++        acc: Expression<Fq>,
++        acc_next: Expression<Fq>,
++        part_next: Expression<Fq>,
++    }
++
++    impl BootstrapCells {
++        /// Accepts exactly `q · (acc_next - 2·acc - part_next)` with `acc`, `acc_next` in one
++        /// advice column at rotations 0 and 1 and `part_next` in another at rotation 1.
++        fn read(poly: &Expression<Fq>) -> Result<Self, Error> {
++            let selectors = Cell::new(0);
++            let (terms, constant) = linear(poly, &selectors).ok_or(Error::Shape)?;
++            let terms: Vec<_> = terms.into_iter().filter(|(_, c)| *c != Fq::ZERO).collect();
++            if selectors.get() != 1 || constant != Fq::ZERO || terms.len() != 3 {
++                return Err(Error::Shape);
++            }
++            let find = |coeff: Fq| {
++                terms
++                    .iter()
++                    .find(|(_, c)| *c == coeff)
++                    .map(|(cell, _)| *cell)
++                    .ok_or(Error::Shape)
++            };
++            let acc_next = find(Fq::ONE)?;
++            let acc = find(-Fq::from(2))?;
++            let part_next = find(-Fq::ONE)?;
++            if acc_next != (acc.0, 1) || acc.1 != 0 || part_next.1 != 1 || part_next.0 == acc.0 {
++                return Err(Error::Shape);
++            }
++            let query = |(column, rotation): (usize, i32)| AdviceQuery::query_expr(column, rotation);
++            Ok(Self {
++                acc: query(acc),
++                acc_next: query(acc_next),
++                part_next: query(part_next),
++            })
++        }
++    }
++
++    /// Advice cells `(column, rotation)` with their coefficients, plus a constant term.
++    type Linear = (BTreeMap<(usize, i32), Fq>, Fq);
++
++    /// Reads `poly` as a linear form over advice cells, treating selectors as 1 and counting them.
++    /// Returns `None` for anything nonlinear or for fixed, instance or challenge queries.
++    fn linear(poly: &Expression<Fq>, selectors: &Cell<usize>) -> Option<Linear> {
++        fn scale((terms, constant): Linear, by: Fq) -> Linear {
++            (terms.into_iter().map(|(k, c)| (k, c * by)).collect(), constant * by)
++        }
++        poly.evaluate(
++            &|c| Some((BTreeMap::new(), c)),
++            &|_| {
++                selectors.set(selectors.get() + 1);
++                Some((BTreeMap::new(), Fq::ONE))
++            },
++            &|_| None,
++            &|q: AdviceQuery| {
++                let cell = (q.column_index(), q.rotation().0);
++                Some((BTreeMap::from([(cell, Fq::ONE)]), Fq::ZERO))
++            },
++            &|_| None,
++            &|_| None,
++            &|a| a.map(|a| scale(a, -Fq::ONE)),
++            &|a, b| {
++                let ((mut terms, c), (other, d)) = (a?, b?);
++                for (k, v) in other {
++                    *terms.entry(k).or_insert(Fq::ZERO) += v;
++                }
++                Some((terms, c + d))
++            },
++            &|a, b| match (a?, b?) {
++                ((ta, ca), b) if ta.is_empty() => Some(scale(b, ca)),
++                (a, (tb, cb)) if tb.is_empty() => Some(scale(a, cb)),
++                _ => None,
++            },
++            &|a, s| a.map(|a| scale(a, s)),
++        )
++    }
++
++    #[derive(Debug)]
++    enum Error {
++        Polynomials,
++        Shape,
++    }
++
++    impl std::fmt::Display for Error {
++        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++            match self {
++                Self::Polynomials => write!(f, "{BOOTSTRAP_GATE}: expected exactly one polynomial"),
++                Self::Shape => write!(
++                    f,
++                    "{BOOTSTRAP_GATE}: expected q * (acc_next - 2 * acc - part_next)"
++                ),
 +            }
 +        }
 +    }
@@ -1633,7 +1800,7 @@ index 1370ae4..1244b8c 100644
      pub(crate) inner: [[AssignedSpreadBits<F>; KECCAK_WIDTH]; KECCAK_WIDTH],
  }
 diff --git a/src/packed_chip/mod.rs b/src/packed_chip/mod.rs
-index 02d103b..9f97ca0 100644
+index 02d103b..f9037be 100644
 --- a/src/packed_chip/mod.rs
 +++ b/src/packed_chip/mod.rs
 @@ -612,12 +612,66 @@ impl<F: PrimeField> PackedChip<F> {
@@ -1745,7 +1912,7 @@ index 02d103b..9f97ca0 100644
      ) -> Result<Self::Digest, Error> {
          let result = layouter.assign_region(
              || "keccakf squeeze region",
-@@ -835,3 +892,396 @@ impl<F: PrimeField> Keccackf1600Instructions<F> for PackedChip<F> {
+@@ -835,3 +892,402 @@ impl<F: PrimeField> Keccackf1600Instructions<F> for PackedChip<F> {
          Ok(digest)
      }
  }
@@ -1806,7 +1973,8 @@ index 02d103b..9f97ca0 100644
 +            Circuit,
 +        );
 +    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
-+    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++    let gates = crate::gate_callbacks::sha3_gate_callbacks();
++    Ok(extractor.extract_circuit_with_callbacks(circuit, Some(&lookups), Some(&gates))?)
 +}
 +
 +#[cfg(feature = "extraction")]
@@ -1871,7 +2039,8 @@ index 02d103b..9f97ca0 100644
 +            Circuit,
 +        );
 +    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
-+    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++    let gates = crate::gate_callbacks::sha3_gate_callbacks();
++    Ok(extractor.extract_circuit_with_callbacks(circuit, Some(&lookups), Some(&gates))?)
 +}
 +
 +#[cfg(feature = "extraction")]
@@ -1938,7 +2107,8 @@ index 02d103b..9f97ca0 100644
 +            Circuit,
 +        );
 +    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
-+    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++    let gates = crate::gate_callbacks::sha3_gate_callbacks();
++    Ok(extractor.extract_circuit_with_callbacks(circuit, Some(&lookups), Some(&gates))?)
 +}
 +
 +#[cfg(feature = "extraction")]
@@ -2002,7 +2172,8 @@ index 02d103b..9f97ca0 100644
 +            Circuit,
 +        );
 +    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
-+    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++    let gates = crate::gate_callbacks::sha3_gate_callbacks();
++    Ok(extractor.extract_circuit_with_callbacks(circuit, Some(&lookups), Some(&gates))?)
 +}
 +
 +#[cfg(feature = "extraction")]
@@ -2069,7 +2240,8 @@ index 02d103b..9f97ca0 100644
 +            Circuit,
 +        );
 +    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
-+    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++    let gates = crate::gate_callbacks::sha3_gate_callbacks();
++    Ok(extractor.extract_circuit_with_callbacks(circuit, Some(&lookups), Some(&gates))?)
 +}
 +
 +#[cfg(feature = "extraction")]
@@ -2137,13 +2309,14 @@ index 02d103b..9f97ca0 100644
 +            Circuit,
 +        );
 +    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
-+    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++    let gates = crate::gate_callbacks::sha3_gate_callbacks();
++    Ok(extractor.extract_circuit_with_callbacks(circuit, Some(&lookups), Some(&gates))?)
 +}
 +
 +#[cfg(feature = "extraction")]
 +picus::register_harness!("keccakf/squeeze/packed/byte", extract_squeeze);
 diff --git a/src/sha3_256_gadget.rs b/src/sha3_256_gadget.rs
-index 2a0ceb3..77677f1 100644
+index 2a0ceb3..28b0d0a 100644
 --- a/src/sha3_256_gadget.rs
 +++ b/src/sha3_256_gadget.rs
 @@ -5,6 +5,7 @@ use midnight_proofs::{
@@ -2154,7 +2327,7 @@ index 2a0ceb3..77677f1 100644
  
  use crate::{
      constants::KECCAK_ABSORB_BYTES, instructions::Keccackf1600Instructions, packed_chip::PackedChip,
-@@ -230,6 +231,132 @@ where
+@@ -230,6 +231,133 @@ where
      }
  }
  
@@ -2278,7 +2451,8 @@ index 2a0ceb3..77677f1 100644
 +            Circuit,
 +        );
 +    let lookups = crate::lookup_callbacks::sha3_lookup_callbacks();
-+    Ok(extractor.extract_circuit(circuit, Some(&lookups))?)
++    let gates = crate::gate_callbacks::sha3_gate_callbacks();
++    Ok(extractor.extract_circuit_with_callbacks(circuit, Some(&lookups), Some(&gates))?)
 +}
 +
 +#[cfg(feature = "extraction")]
