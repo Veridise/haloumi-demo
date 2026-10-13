@@ -50,10 +50,18 @@ This is the configuration for integrating their Halo2 crate with Haloumi. The sa
 
 This is the main configuration file. It should be good to go for the demo; there's no need to touch anything.
 
-### `src/sha3_256_gadget.rs` Lines 234–358
+### `src/sha3_256_gadget.rs` Lines 234–359
 
 This is one of the harnesses that we ported from the old extractor. The new model revolves around defining the harnesses next to the circuit itself. We plan to leverage macros similar to the one used for defining groups (`picus::group`).
 
 ### `src/lib.rs`
 
 This includes supporting code for working with their lookups, including the code that gets injected to represent every lookup and the special Picus modules `Spread` and `Unspread`.
+
+It also includes the gate callbacks (the `gate_callbacks` module), which every harness passes to `extract_circuit_with_callbacks`. The packed Keccak chip splits noisy spread words into clean parts with its `"bootstrap constraint"` gate, `acc[r+1] = 2·acc[r] + part[r+1]`. Picus can't derive that the parts are unique from range bounds alone, so on each row where the gate is enabled, the `BootstrapAxioms` pattern emits the gate's constraint plus one axiom:
+
+```
+det(acc[r+1]) → det(acc[r]) ∧ det(part[r+1])
+```
+
+The pattern reads the cells off the gate's polynomial and fails if the polynomial has any other shape. `keccakf` gets 2,065 of these axioms, which replace about 550K lookup-based ones, and `keccakf` and `sha3/digest_1` both verify in Picus. Gate callbacks need Haloumi [PR #33](https://github.com/project-llzk/haloumi/pull/33); `prepare.sh` checks out that branch.
