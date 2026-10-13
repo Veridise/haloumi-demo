@@ -1316,7 +1316,7 @@ index 0568537..d645c56 100644
 +default = []
 +extraction = []
 diff --git a/src/lib.rs b/src/lib.rs
-index fd0799a..096eb4d 100644
+index fd0799a..1cf0908 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
 @@ -7,3 +7,457 @@ pub mod sha3_256_gadget;
@@ -1330,14 +1330,14 @@ index fd0799a..096eb4d 100644
 +}
 +
 +picus::register_prelude!("spread", spread_prelude);
-+pub fn spread_prelude() -> Prelude {
-+    Prelude::new()
++pub fn spread_prelude(prelude: &mut Prelude) {
++    prelude
 +        .add("Spread".to_string(), 1, 1, |_, o| {
 +            IRStmt::assume_deterministic(o[0])
 +        })
 +        .add("Unspread".to_string(), 1, 1, |_, o| {
 +            IRStmt::assume_deterministic(o[0])
-+        })
++        });
 +}
 +
 +#[cfg(feature = "extraction")]
