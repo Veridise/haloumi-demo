@@ -1,7 +1,10 @@
 #!/bin/bash 
 
+set -e
+
 sha3_repo_dir=sha3-circuit
 sha3_repo=https://github.com/alexandroszacharakis8/$sha3_repo_dir
+skel=$(realpath envrc.skel)
 
 echo Installing cargo-haloumi...
 cargo install cargo-haloumi
@@ -18,6 +21,8 @@ if ! [ -e $sha3_repo_dir ] ; then
   echo Applying patch
   git apply ../sha3-circuit.patch
 
+  echo Adding .envrc file 
+  cp $skel .envrc
   echo Allowing environment
   direnv allow
 
